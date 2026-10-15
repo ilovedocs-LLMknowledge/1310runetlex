@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Договоры: протокол и итоговая редакция</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc;
+    --accent: #2f5d8a; --accent-ink: #ffffff;
+    --ins-bg: #dcf3df; --ins-ink: #14532d; --del-bg: #fbe0de; --del-ink: #8a1c13;
+    --warn-bg: #fdf1d6; --warn-ink: #7a5300; --ok-bg: #dcf3df; --ok-ink: #14532d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 0 20px 120px; }
+  header.top { position: sticky; top: 0; z-index: 5; background: rgba(246,245,242,.96);
+               border-bottom: 1px solid var(--line); }
+  .top-in { max-width: 1200px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; gap: 6px; }
+  .tab { border: 0; background: transparent; padding: 8px 14px; border-radius: 8px; font-weight: 600; color: var(--muted); }
+  .tab.on { background: var(--card); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+  .gear { margin-left: auto; }
+  h1 { font-size: 24px; margin: 26px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .drop { border: 2px dashed #c9c6bf; border-radius: 14px; background: var(--card);
+          padding: 30px 20px; text-align: center; cursor: pointer; transition: .15s; }
+  .drop.over { border-color: var(--accent); background: #eef3f8; }
+  .drop b { font-size: 17px; }
+  .drop small { display: block; color: var(--muted); margin-top: 6px; }
+  .drop.small { padding: 18px 20px; }
+  .loaded { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+           padding: 18px 20px; margin-top: 18px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .fields label { display: block; font-size: 13px; color: var(--muted); }
+  input[type=text], input[type=password], input:not([type]), select, textarea {
+    font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+  .fields input { width: 100%; margin-top: 4px; }
+  textarea { width: 100%; resize: vertical; font-size: 14px; line-height: 1.45; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+           padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+                   padding: 11px 22px; font-weight: 600; }
+  button.link { border: 0; background: none; color: var(--accent); padding: 2px 4px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin: 26px 0 12px; flex-wrap: wrap; }
+  .toolbar .count { margin-left: auto; color: var(--muted); }
+  .legend span { padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-size: 13px; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+          margin-bottom: 12px; overflow: hidden; }
+  .item.off { opacity: .55; }
+  .item-head { display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+               border-bottom: 1px solid var(--line); cursor: pointer; user-select: none; flex-wrap: wrap; }
+  .item-head input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .num { font-weight: 700; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #eceae5; color: var(--muted); white-space: nowrap; }
+  .tag.ok { background: var(--ok-bg); color: var(--ok-ink); }
+  .tag.warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .tag.bad { background: var(--del-bg); color: var(--del-ink); }
+  .tag.cloud { background: #e4ecf5; color: var(--accent); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; }
+  .col { padding: 12px 18px 14px; font-size: 14px; }
+  .col + .col { border-left: 1px solid var(--line); }
+  .col h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .col p { margin: 0 0 6px; }
+  .col .empty { color: var(--muted); font-style: italic; }
+  ins { background: var(--ins-bg); color: var(--ins-ink); text-decoration: none; border-radius: 3px; }
+  del { background: var(--del-bg); color: var(--del-ink); border-radius: 3px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,.96);
+         border-top: 1px solid var(--line); padding: 14px 20px; }
+  .bar-in { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .err { color: var(--del-ink); white-space: pre-line; }
+  .warnbox { background: var(--warn-bg); color: var(--warn-ink); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+  .warnbox ul { margin: 6px 0 0; padding-left: 18px; }
+  .src { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center;
+         padding: 12px 0; border-top: 1px solid var(--line); }
+  .src:first-child { border-top: 0; }
+  .src .order { display: flex; flex-direction: column; gap: 2px; }
+  .src .order button { padding: 0 8px; line-height: 1.3; }
+  .src .label-in { width: 100%; max-width: 520px; }
+  .src-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .grid-edit { display: grid; grid-template-columns: 220px 110px 110px 1fr; gap: 8px; padding: 12px 18px; align-items: start; }
+  .grid-edit label { font-size: 12px; color: var(--muted); display: block; }
+  .grid-edit select, .grid-edit input { width: 100%; }
+  .texts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 18px 14px; }
+  .found { padding: 0 18px 12px; font-size: 13px; color: var(--muted); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #c9c6bf; border-top-color: var(--accent);
+             border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  table.hist { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.hist th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
+                  letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  table.hist td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.hist td.act { white-space: nowrap; text-align: right; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; padding: 22px; width: min(520px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.25); }
+  dialog label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+  dialog input { width: 100%; }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) {
+    .cols, .texts { grid-template-columns: 1fr; } .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+    .grid-edit { grid-template-columns: 1fr 1fr; }
+    .grid-edit [data-found] { grid-column: 1 / -1 !important; padding-top: 0 !important; }
+  }
+</style>
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <button class="tab on" data-tab="protocol">Протокол разногласий</button>
+  <button class="tab" data-tab="final">Итоговая редакция</button>
+  <button class="tab" data-tab="history">История</button>
+  <button class="gear" id="gear" title="Настройки">⚙ Настройки</button>
+</div></header>
+
+<main>
+<!-- =================== Вкладка 1: протокол разногласий =================== -->
+<section id="tab-protocol">
+  <h1>Протокол разногласий из правок Word</h1>
+  <p class="sub">Файлы обрабатываются только на этом компьютере и никуда не отправляются. Копии сохраняются в историю.</p>
+
+  <div id="drop" class="drop">
+    <b>Перетащите сюда договор с правками (.docx)</b>
+    <small>или нажмите, чтобы выбрать файл</small>
+  </div>
+  <input id="file" type="file" accept=".docx" hidden>
+
+  <div id="loadedBox" class="panel loaded" hidden>
+    <span>Договор: <b id="fname"></b></span>
+    <button id="another">Загрузить другой</button>
+  </div>
+
+  <div class="panel">
+    <h2>Шаблон и данные для протокола</h2>
+    <div class="loaded" style="margin-bottom:14px">
+      <span>Шаблон: <b id="tplName">—</b></span>
+      <button id="tplBtn">Выбрать другой шаблон</button>
+      <input id="tplFile" type="file" accept=".docx" hidden>
+    </div>
+    <div id="fields" class="fields"></div>
+    <p class="muted" id="fieldsHint" style="margin:10px 0 0">Пустые поля останутся в протоколе как {{…}} — их можно заполнить в Word.</p>
+  </div>
+
+  <p id="error" class="err"></p>
+
+  <div id="listBox" hidden>
+    <div class="toolbar">
+      <button id="all">Выбрать все</button>
+      <button id="none">Снять все</button>
+      <span class="legend muted">Подсветка: <span style="background:var(--del-bg);color:var(--del-ink)"><s>удалено</s></span><span style="background:var(--ins-bg);color:var(--ins-ink)">добавлено</span></span>
+      <span class="count" id="count"></span>
+    </div>
+    <div id="list"></div>
+  </div>
+</section>
+
+<!-- =================== Вкладка 2: итоговая редакция =================== -->
+<section id="tab-final" hidden>
+  <h1>Итоговая редакция договора</h1>
+  <p class="sub">Исходный договор + протокол разногласий и/или допсоглашения → договор с правками Word, автор каждой правки — документ-источник.</p>
+
+  <div class="panel">
+    <h2>1. Исходный договор</h2>
+    <div id="fDrop" class="drop small"><b>Перетащите исходный договор (.docx)</b><small>или нажмите, чтобы выбрать</small></div>
+    <input id="fFile" type="file" accept=".docx" hidden>
+    <div id="fLoaded" class="loaded" hidden>
+      <span>Договор: <b id="fName"></b></span>
+      <span id="fInfo" class="muted"></span>
+      <button id="fAnother">Заменить</button>
+    </div>
+    <div id="fWarn" class="warnbox" style="margin-top:10px" hidden></div>
+  </div>
+
+  <div class="panel">
+    <h2>2. Изменяющие документы</h2>
+    <div id="sDrop" class="drop small"><b>Перетащите протокол разногласий или допсоглашения</b>
+      <small>.docx, сканы .pdf / .jpg / .png / .heic — можно несколько сразу</small></div>
+    <input id="sFile" type="file" accept=".docx,.pdf,.jpg,.jpeg,.png,.heic,.heif,.tif,.tiff,.webp" multiple hidden>
+    <p class="muted" style="margin:10px 0 0">
+      <label><input type="checkbox" id="useGemini" checked> Разбирать сканы и допсоглашения через Gemini</label>
+      — <span id="geminiNote"></span>. Протоколы с таблицей в .docx разбираются на этом компьютере.
+    </p>
+    <div id="srcList" style="margin-top:8px"></div>
+  </div>
+
+  <p id="fError" class="err"></p>
+
+  <div id="editsBox" hidden>
+    <div class="toolbar">
+      <h2 style="margin:0;font-size:17px">3. Проверьте правки</h2>
+      <span class="legend muted">Статус:
+        <span class="tag ok">найден</span><span class="tag warn">найден по тексту</span><span class="tag bad">не найден</span></span>
+      <span class="count" id="fCount"></span>
+    </div>
+    <div id="fWarnings" class="warnbox" hidden></div>
+    <div id="editList" style="margin-top:12px"></div>
+  </div>
+</section>
+
+<!-- =================== Вкладка 3: история =================== -->
+<section id="tab-history" hidden>
+  <h1>История</h1>
+  <p class="sub">Все прогоны программы. Файлы лежат в папке «Архив» рядом с программой.</p>
+  <div class="loaded">
+    <input id="hQuery" placeholder="Поиск по договору или источнику" style="flex:1;min-width:220px">
+    <select id="hKind"><option value="">Все</option><option value="protocol">Протоколы разногласий</option>
+      <option value="final">Итоговые редакции</option></select>
+    <button id="hArchive">Открыть папку «Архив»</button>
+  </div>
+  <div class="panel" style="padding:6px 10px">
+    <table class="hist"><thead><tr><th>Дата</th><th>Договор</th><th>Что сделано</th><th>Файлы</th><th></th></tr></thead>
+      <tbody id="hBody"></tbody></table>
+    <p id="hEmpty" class="muted" style="padding:10px" hidden>Пока ничего нет.</p>
+  </div>
+</section>
+</main>
+
+<div class="bar" id="bar" hidden>
+  <div class="bar-in">
+    <button class="primary" id="make">Создать протокол разногласий</button>
+    <span class="muted" id="barInfo"></span>
+    <button id="barReveal" hidden>Показать в Finder</button>
+  </div>
+</div>
+<div class="bar" id="fBar" hidden>
+  <div class="bar-in">
+    <button class="primary" id="fMake">Собрать итоговую редакцию</button>
+    <span class="muted" id="fBarInfo"></span>
+    <button id="fReveal" hidden>Показать в Finder</button>
+  </div>
+</div>
+
+<dialog id="settings">
+  <h2 style="margin:0 0 6px;font-size:18px">Настройки Gemini</h2>
+  <p class="muted" style="margin:0">Ключ хранится только в файле .env рядом с программой. Программа его не показывает.</p>
+  <p>Ключ: <b id="keyState">—</b></p>
+  <label>Новый ключ (оставьте пустым, чтобы не менять)</label>
+  <input type="password" id="keyInput" autocomplete="off" spellcheck="false">
+  <label>Модель</label>
+  <input id="modelInput" spellcheck="false">
+  <p id="setMsg" class="muted"></p>
+  <div class="loaded" style="justify-content:flex-end">
+    <button id="setTest">Проверить связь</button>
+    <button id="setClose">Закрыть</button>
+    <button class="primary" id="setSave" style="padding:7px 16px">Сохранить</button>
+  </div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function post(url, body, headers = {}) {
+  const r = await fetch(url, { method: "POST", body, headers });
+  if (!r.ok) { let m = "Ошибка"; try { m = (await r.json()).error; } catch (_) {} throw new Error(m); }
+  return r;
+}
+const postJson = (url, obj) => post(url, JSON.stringify(obj), { "Content-Type": "application/json" });
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const reveal = (id, what = "folder") => postJson("/api/reveal", { id, what }).catch(e => alert(e.message));
+
+/* ---------------- вкладки ---------------- */
+let currentTab = "protocol";
+function showTab(name) {
+  currentTab = name;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  for (const t of ["protocol", "final", "history"]) $("tab-" + t).hidden = t !== name;
+  $("bar").hidden = !(name === "protocol" && items.length);
+  $("fBar").hidden = !(name === "final" && F.contract);
+  if (name === "history") loadHistory();
+}
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+/* перетаскивание: файл попадает в зону, над которой его отпустили */
+function dropZone(el, onFiles) {
+  el.addEventListener("dragenter", e => { e.preventDefault(); el.classList.add("over"); });
+  el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("over"); });
+  el.addEventListener("dragleave", () => el.classList.remove("over"));
+  el.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); el.classList.remove("over"); onFiles([...e.dataTransfer.files]); });
+}
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  const files = [...e.dataTransfer.files];
+  if (!files.length) return;
+  if (currentTab === "protocol") loadContract(files[0]);
+  else if (currentTab === "final") (F.contract ? addSources(files) : loadFinalContract(files[0]));
+});
+
+/* ======================= Вкладка 1 ======================= */
+let items = [], contractName = "", lastProtocolRun = null;
+const KIND = { new: "новый пункт", deleted: "пункт исключён", renum: "изменён только номер", changed: "" };
+
+function renderParas(paras, emptyText) {
+  if (!paras.length) return `<p class="empty">${emptyText}</p>`;
+  return paras.map(segs => "<p>" + segs.map(([k, t]) =>
+    k === "ins" ? `<ins>${esc(t)}</ins>` : k === "del" ? `<del>${esc(t)}</del>` : esc(t)).join("") + "</p>").join("");
+}
+
+function render() {
+  $("list").innerHTML = items.map((it, i) => `
+    <div class="item ${it.on ? "" : "off"}" data-i="${i}">
+      <label class="item-head">
+        <input type="checkbox" ${it.on ? "checked" : ""} data-i="${i}">
+        <span class="num">П. ${esc(it.label)}</span>
+        ${KIND[it.kind] ? `<span class="tag">${KIND[it.kind]}</span>` : ""}
+        <span class="muted" style="margin-left:auto">включить в протокол разногласий</span>
+      </label>
+      <div class="cols">
+        <div class="col"><h3>Было</h3>${renderParas(it.old, "Отсутствует")}</div>
+        <div class="col"><h3>Стало</h3>${renderParas(it.new, "Исключить")}</div>
+      </div>
+    </div>`).join("");
+  updateCount();
+}
+
+function updateCount() {
+  const n = items.filter(x => x.on).length;
+  $("count").textContent = `Пунктов с правками: ${items.length}, выбрано: ${n}`;
+  $("barInfo").textContent = `В протокол попадёт пунктов: ${n}`;
+  $("make").disabled = n === 0;
+  document.querySelectorAll("#list .item").forEach(el => el.classList.toggle("off", !items[el.dataset.i].on));
+}
+
+$("list").addEventListener("change", e => {
+  if (e.target.dataset.i !== undefined) { items[e.target.dataset.i].on = e.target.checked; updateCount(); }
+});
+$("all").onclick = () => { items.forEach(x => x.on = true); render(); };
+$("none").onclick = () => { items.forEach(x => x.on = false); render(); };
+
+async function loadContract(file) {
+  $("error").textContent = "";
+  if (!file.name.toLowerCase().endsWith(".docx")) { $("error").textContent = "Нужен файл Word в формате .docx"; return; }
+  try {
+    const data = await (await post("/api/parse", file, { "X-Filename": encodeURIComponent(file.name) })).json();
+    contractName = file.name.replace(/\.docx$/i, "");
+    items = data.items.map(x => ({ ...x, on: true }));
+    $("fname").textContent = file.name;
+    $("drop").hidden = true; $("loadedBox").hidden = false;
+    $("listBox").hidden = false; $("bar").hidden = false; $("barReveal").hidden = true;
+    if (!items.length) $("error").textContent = "В этом файле не найдено правок в режиме рецензирования.";
+    render();
+  } catch (e) { $("error").textContent = e.message; }
+}
+
+$("drop").onclick = () => $("file").click();
+$("another").onclick = () => $("file").click();
+$("file").onchange = e => { if (e.target.files[0]) loadContract(e.target.files[0]); e.target.value = ""; };
+dropZone($("drop"), files => loadContract(files[0]));
+
+function showTemplate(info) {
+  $("tplName").textContent = info.name || "не найден — выберите файл шаблона";
+  const old = {};
+  document.querySelectorAll("#fields input").forEach(i => old[i.name] = i.value);
+  $("fields").innerHTML = info.placeholders.map(p =>
+    `<label>${esc(p)}<input name="${esc(p)}" value="${esc(old[p] || "")}"></label>`).join("");
+  $("fieldsHint").hidden = !info.placeholders.length;
+}
+$("tplBtn").onclick = () => $("tplFile").click();
+$("tplFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try { showTemplate(await (await post("/api/template", f, { "X-Filename": encodeURIComponent(f.name) })).json()); $("error").textContent = ""; }
+  catch (err) { $("error").textContent = err.message; }
+};
+fetch("/api/template").then(r => r.json()).then(showTemplate);
+
+$("make").onclick = async () => {
+  $("error").textContent = "";
+  const fields = {};
+  document.querySelectorAll("#fields input").forEach(i => fields[i.name] = i.value);
+  const chosen = items.filter(x => x.on).map(({ label, old, new: nw }) => ({ label, old, new: nw }));
+  try {
+    const r = await postJson("/api/generate", { fields, items: chosen });
+    lastProtocolRun = r.headers.get("X-Run-Id");
+    download(await r.blob(), `Протокол разногласий — ${contractName}.docx`);
+    $("barInfo").textContent = "Готово: файл сохранён в «Загрузки» и в историю.";
+    $("barReveal").hidden = !lastProtocolRun;
+  } catch (e) { $("error").textContent = e.message; }
+};
+$("barReveal").onclick = () => lastProtocolRun && reveal(lastProtocolRun, "result");
+
+/* ======================= Вкладка 2 ======================= */
+const ACTIONS = { replace_clause: "изложить в новой редакции", insert: "дополнить пунктом",
+                  delete_clause: "исключить пункт", replace_words: "заменить слова", renumber: "изменить номер" };
+const VIA = { local: "разобран на компьютере", gemini: "☁ разобран Gemini", regex: "разобран по шаблонам формулировок" };
+const STATUS = { exact: ["ok", "найден"], by_text: ["warn", "найден по тексту"], not_found: ["bad", "не найден"],
+                 skipped: ["", "пропущена"], off: ["", "отключена"], error: ["bad", "ошибка"] };
+const F = { contract: null, sources: [], results: {}, lastRun: null };
+let settings = { gemini_key_set: false, gemini_model: "" };
+
+async function loadFinalContract(file) {
+  $("fError").textContent = "";
+  if (!file.name.toLowerCase().endsWith(".docx")) { $("fError").textContent = "Исходный договор нужен в формате .docx"; return; }
+  try {
+    const info = await (await post("/api/final/contract", file, { "X-Filename": encodeURIComponent(file.name) })).json();
+    F.contract = info;
+    $("fName").textContent = file.name;
+    const num = { auto: "автонумерация Word", text: "номера набраны текстом", mixed: "автонумерация и номера текстом", none: "пункты без номеров" }[info.numbering];
+    $("fInfo").textContent = `пунктов с номерами: ${info.clauses} · ${num}`;
+    $("fWarn").hidden = !info.has_revisions;
+    $("fWarn").textContent = "В договоре уже есть непринятые правки. Они останутся в файле; изменения будут применяться к принятой редакции.";
+    $("fDrop").hidden = true; $("fLoaded").hidden = false;
+    $("fBar").hidden = currentTab !== "final";
+    schedulePreview(0);
+  } catch (e) { $("fError").textContent = e.message; }
+}
+$("fDrop").onclick = () => $("fFile").click();
+$("fAnother").onclick = () => $("fFile").click();
+$("fFile").onchange = e => { if (e.target.files[0]) loadFinalContract(e.target.files[0]); e.target.value = ""; };
+dropZone($("fDrop"), files => loadFinalContract(files[0]));
+
+$("sDrop").onclick = () => $("sFile").click();
+$("sFile").onchange = e => { addSources([...e.target.files]); e.target.value = ""; };
+dropZone($("sDrop"), addSources);
+
+const isScan = name => /\.(pdf|jpe?g|png|heic|heif|tiff?|webp)$/i.test(name);
+
+async function addSources(files) {
+  $("fError").textContent = "";
+  for (const file of files) {
+    const tmp = { tmp: true, filename: file.name, id: "tmp" + Math.random() };
+    F.sources.push(tmp); renderSources();
+    try {
+      const res = await (await post("/api/final/source", file, {
+        "X-Filename": encodeURIComponent(file.name), "X-Use-Gemini": $("useGemini").checked ? "1" : "0" })).json();
+      Object.assign(tmp, res, { tmp: false, label: res.meta.label });
+      sortByDate();
+    } catch (e) {
+      F.sources.splice(F.sources.indexOf(tmp), 1);
+      $("fError").textContent = `${file.name}: ${e.message}`;
+    }
+    renderSources(); renderEdits(); schedulePreview(0);
+  }
+}
+
+function sortByDate() {
+  // по дате документа; протокол без даты подписывается вместе с договором — он первый
+  const key = s => { const m = /(\d\d)\.(\d\d)\.(\d{4})/.exec(s.meta?.date || "");
+                     return m ? m[3] + m[2] + m[1] : s.meta?.kind === "protocol" ? "00000000" : "99999999"; };
+  const done = F.sources.filter(s => !s.tmp).sort((a, b) => key(a).localeCompare(key(b)));
+  F.sources = [...done, ...F.sources.filter(s => s.tmp)];
+}
+
+function renderSources() {
+  $("srcList").innerHTML = F.sources.map((s, i) => s.tmp ? `
+    <div class="src"><span></span><div><span class="spinner"></span> ${esc(s.filename)} —
+      ${isScan(s.filename) || !/\.docx$/i.test(s.filename) ? "распознаю через Gemini, это может занять до минуты…" : "разбираю…"}</div><span></span></div>` : `
+    <div class="src">
+      <div class="order"><button data-up="${i}" ${i ? "" : "disabled"} title="Применять раньше">↑</button>
+        <button data-down="${i}" ${i < F.sources.length - 1 ? "" : "disabled"} title="Применять позже">↓</button></div>
+      <div>
+        <input class="label-in" data-label="${i}" value="${esc(s.label)}" title="Автор правок в Word">
+        <div class="src-meta">
+          <span class="muted">${i + 1}. ${esc(s.filename)}</span>
+          <span class="tag ${s.via === "gemini" ? "cloud" : ""}">${VIA[s.via] || s.via}</span>
+          <span class="tag">правок: ${s.edits.length}</span>
+          ${s.columns ? `<label class="muted">итоговая редакция из колонки
+             <select data-col="${i}">${s.columns.headers.map((h, k) => s.columns.red.includes(k) && k !== s.columns.old
+               ? `<option value="${k}" ${k === s.columns.new ? "selected" : ""}>${esc(h)}</option>` : "").join("")}</select></label>` : ""}
+          ${s.unparsed?.length ? `<span class="tag warn">не разобрано фрагментов: ${s.unparsed.length}</span>` : ""}
+        </div>
+        ${s.unparsed?.length ? `<details class="muted"><summary>Не удалось разобрать — добавьте правки вручную</summary>
+          ${s.unparsed.map(u => `<p>${esc(u)}</p>`).join("")}</details>` : ""}
+      </div>
+      <button data-del="${i}" title="Убрать документ">✕</button>
+    </div>`).join("") || `<p class="muted">Документы пока не добавлены.</p>`;
+  $("editsBox").hidden = !F.sources.some(s => !s.tmp);
+}
+
+$("srcList").addEventListener("click", e => {
+  const t = e.target, d = t.dataset;
+  const move = (i, j) => { [F.sources[i], F.sources[j]] = [F.sources[j], F.sources[i]]; renderSources(); renderEdits(); schedulePreview(0); };
+  if (d.up) move(+d.up, +d.up - 1);
+  else if (d.down) move(+d.down, +d.down + 1);
+  else if (d.del) { const s = F.sources.splice(+d.del, 1)[0]; postJson("/api/final/drop-source", { id: s.id }); renderSources(); renderEdits(); schedulePreview(0); }
+});
+$("srcList").addEventListener("input", e => {
+  if (e.target.dataset.label !== undefined) { F.sources[e.target.dataset.label].label = e.target.value; renderEditHeads(); }
+});
+$("srcList").addEventListener("change", async e => {
+  const i = e.target.dataset.col;
+  if (i === undefined) return;
+  const s = F.sources[i];
+  try {
+    const res = await (await postJson("/api/final/reparse", { id: s.id, new_col: +e.target.value })).json();
+    Object.assign(s, { edits: res.edits, columns: res.columns });
+    renderSources(); renderEdits(); schedulePreview(0);
+  } catch (err) { $("fError").textContent = err.message; }
+});
+
+function statusTag(r, e) {
+  if (!r) return `<span class="tag">проверяю…</span>`;
+  let [cls, txt] = STATUS[r.status] || ["", r.status];
+  const ok = r.status === "exact" || r.status === "by_text";
+  if (ok && e?.action === "insert") txt = r.found && /^\d/.test(r.found) ? `вставка после п. ${esc(r.found)}` : "вставка после предыдущей правки";
+  else if (ok && r.found) txt += ` · п. ${esc(r.found)}`;
+  return `<span class="tag ${cls}">${txt}</span>`;
+}
+function editById(id) {
+  for (const s of F.sources) for (const e of s.edits || []) if (e.id === id) return e;
+}
+
+function editCard(s, si, e, ei) {
+  const r = F.results[e.id];
+  const showOld = e.action !== "insert" && e.action !== "renumber";
+  const oldLabel = e.action === "replace_words" ? "Слова" : "Прежняя редакция (для поиска; можно оставить пустой)";
+  const newLabel = { replace_words: "Заменить на", renumber: "Новый номер", delete_clause: "" }[e.action] ?? "Новая редакция";
+  return `
+  <div class="item ${e.enabled ? "" : "off"}" data-s="${si}" data-e="${ei}">
+    <div class="item-head">
+      <input type="checkbox" data-f="enabled" ${e.enabled ? "checked" : ""}>
+      <span class="num">${e.target ? "П. " + esc(e.target) : esc(e.label || "Без номера")}</span>
+      <span class="tag">${ACTIONS[e.action] || e.action}</span>
+      <span data-status="${esc(e.id)}">${statusTag(r, e)}</span>
+      ${e.note ? `<span class="muted">${esc(e.note)}</span>` : ""}
+      <button class="link" data-remove style="margin-left:auto">удалить правку</button>
+    </div>
+    <div class="grid-edit">
+      <div><label>Действие</label><select data-f="action">${Object.entries(ACTIONS).map(([k, v]) =>
+        `<option value="${k}" ${k === e.action ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div><label>${e.action === "insert" ? "Номер нового" : "Пункт"}</label><input data-f="target" value="${esc(e.target)}"></div>
+      <div ${e.action === "insert" ? "" : "hidden"}><label>После пункта</label><input data-f="anchor" value="${esc(e.anchor)}" placeholder="авто"></div>
+      <div class="muted" data-found="${esc(e.id)}" style="font-size:13px;padding-top:18px;grid-column:4">${r?.found_text ? "В договоре: " + esc(r.found_text.slice(0, 220)) + (r.found_text.length > 220 ? "…" : "") : (r?.note ? esc(r.note) : "")}</div>
+    </div>
+    <div class="texts">
+      ${showOld ? `<div><label class="muted">${oldLabel}</label><textarea rows="${Math.min(8, 2 + (e.old_text || "").length / 90 | 0)}" data-f="old_text">${esc(e.old_text)}</textarea></div>` : "<div></div>"}
+      ${newLabel ? `<div><label class="muted">${newLabel}</label><textarea rows="${Math.min(10, 2 + (e.new_text || "").length / 90 | 0)}" data-f="new_text">${esc(e.new_text)}</textarea></div>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderEdits() {
+  $("editList").innerHTML = F.sources.filter(s => !s.tmp).map((s, si) => `
+    <h3 style="margin:22px 0 10px" data-head="${si}">${si + 1}. ${esc(s.label)}</h3>
+    ${s.edits.map((e, ei) => editCard(s, F.sources.indexOf(s), e, ei)).join("") || `<p class="muted">Правок не найдено.</p>`}
+    <button data-add="${F.sources.indexOf(s)}">+ Добавить правку</button>`).join("");
+  updateFinalCount();
+}
+function renderEditHeads() {
+  F.sources.filter(s => !s.tmp).forEach((s, si) => { const h = document.querySelector(`[data-head="${si}"]`); if (h) h.textContent = `${si + 1}. ${s.label}`; });
+}
+
+function editAt(el) {
+  const card = el.closest(".item[data-s]");
+  return card ? { card, s: F.sources[card.dataset.s], e: F.sources[card.dataset.s].edits[card.dataset.e] } : null;
+}
+$("editList").addEventListener("input", ev => {
+  const x = editAt(ev.target), f = ev.target.dataset.f;
+  if (!x || !f || f === "enabled" || f === "action") return;
+  x.e[f] = ev.target.value;
+  if (f === "target") {
+    x.e.targets = x.e.target ? [x.e.target] : [];
+    x.card.querySelector(".num").textContent = x.e.target ? "П. " + x.e.target : (x.e.label || "Без номера");
+  }
+  schedulePreview();
+});
+$("editList").addEventListener("change", ev => {
+  const x = editAt(ev.target), f = ev.target.dataset.f;
+  if (!x) return;
+  if (f === "enabled") { x.e.enabled = ev.target.checked; x.card.classList.toggle("off", !x.e.enabled); updateFinalCount(); schedulePreview(0); }
+  if (f === "action") { x.e.action = ev.target.value; renderEdits(); schedulePreview(0); }
+});
+$("editList").addEventListener("click", ev => {
+  if (ev.target.dataset.add !== undefined) {
+    const s = F.sources[ev.target.dataset.add];
+    s.edits.push({ id: `${s.id}-m${Date.now()}`, action: "replace_clause", target: "", targets: [], anchor: "",
+                   old_text: "", new_text: "", label: "", note: "добавлена вручную", enabled: true });
+    renderEdits(); schedulePreview();
+  } else if (ev.target.dataset.remove !== undefined) {
+    const x = editAt(ev.target);
+    x.s.edits.splice(x.s.edits.indexOf(x.e), 1);
+    renderEdits(); schedulePreview(0);
+  }
+});
+
+function payload() {
+  return { sources: F.sources.filter(s => !s.tmp).map(s => ({ id: s.id, label: s.label || s.meta.label, edits: s.edits })) };
+}
+
+let previewTimer = null, previewSeq = 0;
+function schedulePreview(delay = 600) {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(runPreview, delay);
+}
+async function runPreview() {
+  if (!F.contract || !F.sources.some(s => !s.tmp)) { updateFinalCount(); return; }
+  const seq = ++previewSeq;
+  try {
+    const rep = await (await postJson("/api/final/preview", payload())).json();
+    if (seq !== previewSeq) return;
+    F.results = {};
+    rep.sources.forEach(s => s.results.forEach(r => F.results[r.id] = r));
+    document.querySelectorAll("[data-status]").forEach(el => el.innerHTML = statusTag(F.results[el.dataset.status], editById(el.dataset.status)));
+    document.querySelectorAll("[data-found]").forEach(el => {
+      const r = F.results[el.dataset.found];
+      el.textContent = r?.found_text ? "В договоре: " + r.found_text.slice(0, 220) + (r.found_text.length > 220 ? "…" : "") : (r?.note || "");
+    });
+    $("fWarnings").hidden = !rep.warnings.length;
+    $("fWarnings").innerHTML = `<b>Предупреждения</b><ul>${rep.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul>`;
+    updateFinalCount();
+  } catch (e) { $("fError").textContent = e.message; }
+}
+
+function updateFinalCount() {
+  const all = F.sources.filter(s => !s.tmp).flatMap(s => s.edits);
+  const on = all.filter(e => e.enabled);
+  const bad = on.filter(e => F.results[e.id]?.status === "not_found" || F.results[e.id]?.status === "error").length;
+  $("fCount").textContent = `Правок: ${all.length}, включено: ${on.length}`;
+  $("fBarInfo").textContent = !F.contract ? "Загрузите исходный договор" : !all.length ? "Добавьте изменяющие документы"
+    : `Будет применено: ${on.length - bad} из ${on.length}` + (bad ? ` · не найдено: ${bad} — исправьте или отключите` : "");
+  $("fMake").disabled = !F.contract || !on.length;
+}
+
+$("fMake").onclick = async () => {
+  $("fError").textContent = "";
+  $("fMake").disabled = true; $("fBarInfo").textContent = "Собираю…";
+  try {
+    const r = await postJson("/api/final/build", payload());
+    F.lastRun = r.headers.get("X-Run-Id");
+    const name = decodeURIComponent(r.headers.get("X-Filename") || "итоговая редакция.docx");
+    download(await r.blob(), name);
+    $("fBarInfo").textContent = "Готово: файл сохранён в «Загрузки» и в историю.";
+    $("fReveal").hidden = !F.lastRun;
+  } catch (e) { $("fError").textContent = e.message; $("fBarInfo").textContent = ""; }
+  $("fMake").disabled = false;
+};
+$("fReveal").onclick = () => F.lastRun && reveal(F.lastRun, "result");
+
+/* ======================= Вкладка 3 ======================= */
+let histTimer = null;
+async function loadHistory() {
+  const q = encodeURIComponent($("hQuery").value), kind = $("hKind").value;
+  const runs = await (await fetch(`/api/history?q=${q}&kind=${kind}`)).json();
+  $("hEmpty").hidden = runs.length > 0;
+  $("hBody").innerHTML = runs.map(r => {
+    const d = new Date(r.created);
+    const what = r.kind === "final"
+      ? `${esc(r.kind_title)}<div class="muted">${(r.sources || []).map(s => `${esc(s.label)} — ${s.applied}/${s.total}`).join("<br>")}</div>`
+      : `${esc(r.kind_title)}<div class="muted">пунктов: ${r.items ?? "—"}</div>`;
+    return `<tr>
+      <td>${d.toLocaleDateString("ru-RU")}<div class="muted">${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div></td>
+      <td>${esc(r.contract)}</td><td>${what}</td>
+      <td class="muted">${(r.outputs || []).map(o => esc(o.split("/").pop())).join("<br>")}</td>
+      <td class="act"><button data-open="${esc(r.id)}" ${r.outputs?.length ? "" : "disabled"}>Открыть результат</button>
+        <button data-folder="${esc(r.id)}">Показать в Finder</button></td></tr>`;
+  }).join("");
+}
+$("hBody").addEventListener("click", e => {
+  if (e.target.dataset.open) postJson("/api/reveal", { id: e.target.dataset.open, what: "open" }).catch(err => alert(err.message));
+  if (e.target.dataset.folder) reveal(e.target.dataset.folder, "folder");
+});
+$("hQuery").oninput = () => { clearTimeout(histTimer); histTimer = setTimeout(loadHistory, 250); };
+$("hKind").onchange = loadHistory;
+$("hArchive").onclick = () => postJson("/api/reveal", { id: "", what: "archive" }).catch(err => alert(err.message));
+
+/* ======================= Настройки ======================= */
+function showSettings(s) {
+  settings = s;
+  $("keyState").textContent = s.gemini_key_set ? "задан" : "не задан";
+  $("modelInput").value = s.gemini_model;
+  $("geminiNote").textContent = s.gemini_key_set ? `файлы отправляются в Google Gemini (${s.gemini_model})`
+                                                  : "ключ Gemini не задан — сканы разобрать не получится, ДС разбираются по шаблонам";
+  $("useGemini").disabled = !s.gemini_key_set;
+  if (!s.gemini_key_set) $("useGemini").checked = false;
+}
+fetch("/api/settings").then(r => r.json()).then(showSettings);
+$("gear").onclick = () => { $("keyInput").value = ""; $("setMsg").textContent = ""; $("settings").showModal(); };
+$("setClose").onclick = () => $("settings").close();
+$("setSave").onclick = async () => {
+  try {
+    const body = { model: $("modelInput").value };
+    if ($("keyInput").value.trim()) body.key = $("keyInput").value.trim();
+    showSettings(await (await postJson("/api/settings", body)).json());
+    $("keyInput").value = "";
+    $("setMsg").textContent = "Сохранено.";
+    if (settings.gemini_key_set) $("useGemini").checked = true;
+  } catch (e) { $("setMsg").textContent = e.message; }
+};
+$("setTest").onclick = async () => {
+  $("setMsg").innerHTML = '<span class="spinner"></span> Проверяю…';
+  try { await postJson("/api/settings/test", {}); $("setMsg").textContent = "Связь с Gemini есть, ключ работает."; }
+  catch (e) { $("setMsg").textContent = e.message; }
+};
+</script>
+</body>
+</html>

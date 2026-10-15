@@ -281,18 +281,27 @@ function splitPoints(paras, version) {
   const texts = logical.map(lp => lp.map(i => versionText(paras[i].segs, version)).join("").trim());
   const nonempty = texts.map((t, k) => t ? k : -1).filter(k => k >= 0);
 
+  // номер логического абзаца: автонумерация (у знака абзаца — последнего в группе)
+  // или номер, набранный текстом
+  function lpNum(k) {
+    const auto = (paras[logical[k][logical[k].length - 1]].auto || {})[version];
+    if (auto) return auto;
+    const m = numMatch(texts[k]);
+    return m ? m[1].replace(/\.$/, "") : "";
+  }
+
   function isHeading(k) {  // короткий абзац без номера перед пронумерованным пунктом
     const t = texts[k];
-    if (!t || numMatch(t) || t.length > 80 || ".;:,".includes(t[t.length - 1])) return false;
+    if (!t || lpNum(k) || t.length > 80 || ".;:,".includes(t[t.length - 1])) return false;
     const nxt = nonempty.find(j => j > k);
-    return nxt !== undefined && !!numMatch(texts[nxt]);
+    return nxt !== undefined && !!lpNum(nxt);
   }
 
   const points = [], owner = {};
   logical.forEach((lp, k) => {
-    const m = numMatch(texts[k]), heading = isHeading(k);
-    if (m || heading || !points.length) {
-      points.push({ num: m ? m[1].replace(/\.$/, "") : "", heading: heading ? texts[k] : "", logical: [] });
+    const num = lpNum(k), heading = isHeading(k);
+    if (num || heading || !points.length) {
+      points.push({ num, heading: heading ? texts[k] : "", logical: [] });
     }
     points[points.length - 1].logical.push(lp);
     for (const i of lp) owner[i] = points.length - 1;
@@ -306,10 +315,171 @@ function stripNum(s) {
   return (m ? s.slice(m[0].length) : s).trim();
 }
 
-function parseContract(xml) {
+/* ------------------------------------------------------------------------
+   Автонумерация Word (порт numbering.py): numbering.xml + стили
+   ------------------------------------------------------------------------ */
+
+const wVal = (el, name, def = null) => {
+  const c = wChild(el, name);
+  return c ? (c.getAttributeNS(W, "val") ?? def) : def;
+};
+const wAttr = (el, name) => el ? el.getAttributeNS(W, name) : null;
+const RU_LETTERS = "абвгдежзиклмнопрстуфхцчшщэюя";  // без ё, й, ъ, ы, ь — как в Word
+
+function fmtNumber(n, fmt) {
+  const letters = abc => n <= 0 ? "" : abc[(n - 1) % abc.length].repeat(Math.floor((n - 1) / abc.length) + 1);
+  const roman = () => {
+    let out = "", x = n;
+    for (const [v, r] of [[1000,"m"],[900,"cm"],[500,"d"],[400,"cd"],[100,"c"],[90,"xc"],[50,"l"],[40,"xl"],[10,"x"],[9,"ix"],[5,"v"],[4,"iv"],[1,"i"]])
+      while (x >= v) { out += r; x -= v; }
+    return out;
+  };
+  switch (fmt) {
+    case "decimalZero": return String(n).padStart(2, "0");
+    case "lowerLetter": return letters("abcdefghijklmnopqrstuvwxyz");
+    case "upperLetter": return letters("abcdefghijklmnopqrstuvwxyz").toUpperCase();
+    case "lowerRoman": return roman();
+    case "upperRoman": return roman().toUpperCase();
+    case "russianLower": return letters(RU_LETTERS);
+    case "russianUpper": return letters(RU_LETTERS).toUpperCase();
+    case "none": case "bullet": return "";
+    default: return String(n);
+  }
+}
+
+function readLevel(el, base) {
+  const lv = Object.assign({ start: 1, fmt: "decimal", text: null, restart: null, legal: false, pstyle: null }, base || {});
+  if (wVal(el, "start") !== null) lv.start = parseInt(wVal(el, "start"));
+  if (wVal(el, "numFmt") !== null) lv.fmt = wVal(el, "numFmt");
+  if (wChild(el, "lvlText")) lv.text = wVal(el, "lvlText", "");
+  if (wVal(el, "lvlRestart") !== null) lv.restart = parseInt(wVal(el, "lvlRestart"));
+  if (wChild(el, "isLgl")) lv.legal = !["0", "false"].includes(wVal(el, "isLgl", "1"));
+  if (wVal(el, "pStyle") !== null) lv.pstyle = wVal(el, "pStyle");
+  return lv;
+}
+
+function autoNumbers(elements, numberingXml, stylesXml) {
+  const empty = elements.map(() => ({ old: "", new: "" }));
+  if (!numberingXml) return empty;
+  const parse = x => new DOMParser().parseFromString(x, "application/xml").documentElement;
+  const kids = (el, name) => [...el.children].filter(c => c.namespaceURI === W && c.localName === name);
+  const abstract = {}, absLink = {}, absStyleLink = {}, nums = {}, styles = {};
+  let defaultStyle = null;
+  const nroot = parse(numberingXml);
+  for (const an of kids(nroot, "abstractNum")) {
+    const aid = wAttr(an, "abstractNumId"), lv = {};
+    for (const l of kids(an, "lvl")) lv[parseInt(wAttr(l, "ilvl") || "0")] = readLevel(l);
+    abstract[aid] = lv;
+    if (wVal(an, "numStyleLink")) absLink[aid] = wVal(an, "numStyleLink");
+    if (wVal(an, "styleLink")) absStyleLink[wVal(an, "styleLink")] = aid;
+  }
+  for (const num of kids(nroot, "num")) {
+    const overrides = {}, lvls = {};
+    for (const ov of kids(num, "lvlOverride")) {
+      const il = parseInt(wAttr(ov, "ilvl") || "0");
+      if (wChild(ov, "startOverride")) overrides[il] = parseInt(wVal(ov, "startOverride", "1"));
+      if (wChild(ov, "lvl")) lvls[il] = wChild(ov, "lvl");
+    }
+    nums[wAttr(num, "numId")] = { aid: wVal(num, "abstractNumId"), overrides, lvls };
+  }
+  if (stylesXml) for (const st of kids(parse(stylesXml), "style")) {
+    if (wAttr(st, "type") !== "paragraph") continue;
+    const npr = wChild(wChild(st, "pPr"), "numPr");
+    styles[wAttr(st, "styleId")] = { basedOn: wVal(st, "basedOn"), numId: npr ? wVal(npr, "numId") : null, ilvl: npr ? wVal(npr, "ilvl") : null };
+    if (["1", "true"].includes(wAttr(st, "default"))) defaultStyle = wAttr(st, "styleId");
+  }
+  function styleNumPr(sid) {
+    let numId = null, ilvl = null;
+    const seen = new Set();
+    while (sid && !seen.has(sid) && styles[sid]) {
+      seen.add(sid);
+      if (numId === null && styles[sid].numId !== null) numId = styles[sid].numId;
+      if (ilvl === null && styles[sid].ilvl !== null) ilvl = styles[sid].ilvl;
+      sid = styles[sid].basedOn;
+    }
+    return [numId, ilvl];
+  }
+  function resolveAbstract(aid, depth = 0) {
+    const link = absLink[aid];
+    if (link && depth < 5) {
+      if (absStyleLink[link] !== undefined && absStyleLink[link] !== aid) return absStyleLink[link];
+      const [nid] = styleNumPr(link);
+      if (nums[nid]) return resolveAbstract(nums[nid].aid, depth + 1);
+    }
+    return aid;
+  }
+  function levels(numId) {
+    const n = nums[numId], aid = resolveAbstract(n.aid), base = abstract[aid] || {};
+    const merged = Object.assign({}, base);
+    for (const [il, el] of Object.entries(n.lvls)) merged[il] = readLevel(el, base[il]);
+    return [aid, merged];
+  }
+  function paraNumPr(p, view) {
+    let ppr = wChild(p, "pPr");
+    const changed = wChild(wChild(ppr, "pPrChange"), "pPr");
+    if (view === "old" && changed) ppr = changed;
+    let numId = null, ilvl = null, sid = null;
+    if (ppr) {
+      let npr = wChild(ppr, "numPr");
+      if (npr && view === "old" && wChild(npr, "ins")) npr = null;
+      if (npr) { numId = wVal(npr, "numId"); ilvl = wVal(npr, "ilvl"); }
+      sid = wVal(ppr, "pStyle");
+    }
+    sid = sid || defaultStyle;
+    const [sNum, sIlvl] = styleNumPr(sid);
+    if (numId === null) numId = sNum;
+    if (ilvl === null) ilvl = sIlvl;
+    if (numId === null || numId === "0" || !nums[numId]) return null;
+    if (ilvl === null) {
+      const [, lvls] = levels(numId);
+      const hit = Object.entries(lvls).find(([, lv]) => sid && lv.pstyle === sid);
+      ilvl = hit ? hit[0] : "0";
+    }
+    return [numId, parseInt(ilvl)];
+  }
+  function compute(view) {
+    const counters = {}, started = new Set(), mergeMark = view === "old" ? "ins" : "del";
+    return elements.map(p => {
+      if (paraMark(p) === mergeMark) return "";
+      const npr = paraNumPr(p, view);
+      if (!npr) return "";
+      const [numId, ilvl] = npr, [aid, lvls] = levels(numId), lv = lvls[ilvl];
+      if (!lv) return "";
+      const cnt = counters[aid] = counters[aid] || {};
+      const ov = nums[numId].overrides;
+      if (!started.has(numId) && Object.keys(ov).length) {
+        started.add(numId);
+        for (const [ol, sv] of Object.entries(ov)) {
+          cnt[ol] = sv - 1;
+          for (const k of Object.keys(cnt)) if (+k > +ol) delete cnt[k];
+        }
+      }
+      cnt[ilvl] = (cnt[ilvl] ?? lv.start - 1) + 1;
+      for (const k of Object.keys(cnt)) {
+        if (+k <= ilvl) continue;
+        const r = lvls[k] ? lvls[k].restart : null;
+        if (r === null || (r !== 0 && ilvl < r)) delete cnt[k];
+      }
+      if (lv.fmt === "bullet") return "";
+      const text = (lv.text ?? `%${ilvl + 1}.`).replace(/%(\d)/g, (_, d) => {
+        const k = parseInt(d) - 1, klv = lvls[k] || { start: 1, fmt: "decimal" };
+        const fmt = lv.legal && !["none", "bullet"].includes(klv.fmt) ? "decimal" : klv.fmt;
+        return fmtNumber(cnt[k] ?? klv.start, fmt);
+      });
+      const keys = /\d/.test(text) ? text.match(/\d+(?:\.\d+)*/g) : null;
+      return keys ? keys[keys.length - 1] : "";
+    });
+  }
+  const o = compute("old"), n = compute("new");
+  return elements.map((_, i) => ({ old: o[i], new: n[i] }));
+}
+
+function parseContract(xml, numberingXml, stylesXml) {
   const dom = new DOMParser().parseFromString(xml, "application/xml");
   const body = dom.getElementsByTagNameNS(W, "body")[0];
-  const paras = [...body.getElementsByTagNameNS(W, "p")].map(p => ({ segs: paraSegments(p), mark: paraMark(p) }));
+  const elements = [...body.getElementsByTagNameNS(W, "p")];
+  const auto = autoNumbers(elements, numberingXml, stylesXml);
+  const paras = elements.map((p, i) => ({ segs: paraSegments(p), mark: paraMark(p), auto: auto[i] }));
 
   const O = splitPoints(paras, "old"), N = splitPoints(paras, "new");
 
@@ -535,8 +705,9 @@ async function loadContract(file) {
   $("error").textContent = "";
   if (!file.name.toLowerCase().endsWith(".docx")) { $("error").textContent = "Нужен файл Word в формате .docx"; return; }
   try {
-    const { xml } = await readDocumentXml(await file.arrayBuffer());
-    items = parseContract(xml).map(x => ({ ...x, on: true }));
+    const { files, xml } = await readDocumentXml(await file.arrayBuffer());
+    const part = name => { const f = files.find(x => x.name === name); return f ? new TextDecoder().decode(f.data) : null; };
+    items = parseContract(xml, part("word/numbering.xml"), part("word/styles.xml")).map(x => ({ ...x, on: true }));
     contractName = file.name.replace(/\.docx$/i, "");
     $("fname").textContent = file.name;
     $("drop").hidden = true; $("loadedBox").hidden = false;
