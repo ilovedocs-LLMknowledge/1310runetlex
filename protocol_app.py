@@ -3,8 +3,10 @@
 Протокол разногласий из правок Word.
 
 Запуск: python3 protocol_app.py — откроется страница в браузере.
-Работает только на этом компьютере: сервер слушает 127.0.0.1,
-никаких внешних запросов, только стандартная библиотека Python.
+Работает на этом компьютере: сервер слушает 127.0.0.1, только стандартная
+библиотека Python. В сеть (Gemini) уходят только сканы и допсоглашения во
+вкладке «Итоговая редакция» и только если задан ключ (см. gemini.py).
+Страница интерфейса — page.html.
 """
 import html
 import io
@@ -13,12 +15,15 @@ import re
 import socket
 import sys
 import threading
+import unicodedata
 import webbrowser
 import xml.etree.ElementTree as ET
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
+
+from numbering import Numbering
 
 APP_DIR = Path(__file__).resolve().parent
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -110,20 +115,29 @@ def split_points(paras, version):
     texts = ["".join(version_text(paras[i]["segs"], version) for i in lp).strip() for lp in logical]
     nonempty = [k for k, t in enumerate(texts) if t]
 
+    def lp_num(k):
+        """Номер логического абзаца: автонумерация (у знака абзаца — последнего
+        в группе) или номер, набранный текстом."""
+        auto = paras[logical[k][-1]].get("auto", {}).get(version)
+        if auto:
+            return auto
+        m = num_match(texts[k])
+        return m.group(1).rstrip(".") if m else ""
+
     def is_heading(k):
         """Короткий абзац без номера перед пронумерованным пунктом — заголовок."""
         t = texts[k]
-        if not t or num_match(t) or len(t) > 80 or t[-1] in ".;:,":
+        if not t or lp_num(k) or len(t) > 80 or t[-1] in ".;:,":
             return False
         nxt = next((j for j in nonempty if j > k), None)
-        return nxt is not None and bool(num_match(texts[nxt]))
+        return nxt is not None and bool(lp_num(nxt))
 
     points, owner = [], {}
     for k, lp in enumerate(logical):
-        m = num_match(texts[k])
+        num = lp_num(k)
         heading = is_heading(k)
-        if m or heading or not points:
-            points.append({"num": m.group(1).rstrip(".") if m else "",
+        if num or heading or not points:
+            points.append({"num": num,
                            "heading": texts[k] if heading else "", "logical": []})
         points[-1]["logical"].append(lp)
         for i in lp:
@@ -140,10 +154,22 @@ def strip_num(s):
     return s[m.end():].strip() if m else s.strip()
 
 
+def auto_numbers(zf, elements):
+    """Автонумерация Word для каждого абзаца в обеих редакциях: [{old, new}]."""
+    names = zf.namelist()
+    nb = Numbering(zf.read("word/numbering.xml") if "word/numbering.xml" in names else None,
+                   zf.read("word/styles.xml") if "word/styles.xml" in names else None)
+    views = {v: nb.compute(elements, v) for v in ("old", "new")}
+    return [{v: (views[v][i] or {}).get("key", "") for v in views} for i in range(len(elements))]
+
+
 def parse_contract(data):
-    root = ET.fromstring(zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml"))
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    root = ET.fromstring(zf.read("word/document.xml"))
     body = root.find(W + "body")
-    paras = [{"segs": para_segments(p), "mark": para_mark(p)} for p in body.iter(W + "p")]
+    elements = list(body.iter(W + "p"))
+    paras = [{"segs": para_segments(p), "mark": para_mark(p), "auto": a}
+             for p, a in zip(elements, auto_numbers(zf, elements))]
 
     old_pts, old_owner = split_points(paras, "old")
     new_pts, new_owner = split_points(paras, "new")
@@ -251,11 +277,12 @@ T_RE = re.compile(r"(<w:t(?:\s[^>]*)?>)(.*?)(</w:t>)", re.S)
 
 
 def default_template():
-    preferred = APP_DIR / "шаблон_протокола_разногласий.docx"
-    if preferred.exists():
-        return preferred
-    found = sorted(p for p in APP_DIR.glob("*.docx")
-                   if "шаблон" in p.name.lower() and not p.name.startswith("~$"))
+    for folder in (APP_DIR, APP_DIR / "docs"):
+        preferred = folder / "шаблон_протокола_разногласий.docx"
+        if preferred.exists():
+            return preferred
+    found = sorted(p for folder in (APP_DIR, APP_DIR / "docs") for p in folder.glob("*.docx")
+                   if "шаблон" in unicodedata.normalize("NFC", p.name).lower() and not p.name.startswith("~$"))
     return found[0] if found else None
 
 
@@ -381,7 +408,22 @@ def build_protocol(tpl_bytes, fields, items):
 # Локальный веб-сервер
 # ---------------------------------------------------------------------------
 
-STATE = {"tpl_bytes": None, "tpl_name": None}
+import config  # noqa: E402
+import edits as edits_mod  # noqa: E402
+import gemini  # noqa: E402
+import history  # noqa: E402
+import redline  # noqa: E402
+import sources as sources_mod  # noqa: E402
+
+PAGE_PATH = APP_DIR / "page.html"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+STATE = {
+    "tpl_bytes": None, "tpl_name": None,
+    "contract": None, "contract_name": None,          # вкладка 1
+    "final": {"contract": None, "name": None, "sources": {}, "seq": 0},  # вкладка 2
+}
+LOCK = threading.Lock()
 
 
 def load_default_template():
@@ -397,15 +439,33 @@ def template_info():
     return {"name": STATE["tpl_name"], "placeholders": template_placeholders(STATE["tpl_bytes"])}
 
 
+def stem(name):
+    return re.sub(r"\.(docx|pdf|jpe?g|png|heic|heif|tiff?|webp)$", "", name or "", flags=re.I)
+
+
+def final_sources(req):
+    """Источники из запроса интерфейса + их файлы с сервера, в порядке применения."""
+    stored = STATE["final"]["sources"]
+    out = []
+    for s in req.get("sources", []):
+        if s.get("id") not in stored:
+            raise ValueError("Документ-источник не найден — загрузите его заново.")
+        out.append({"id": s["id"], "label": (s.get("label") or "").strip() or stored[s["id"]]["meta"]["label"],
+                    "edits": s.get("edits", []), "filename": stored[s["id"]]["filename"]})
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def send(self, code, body, ctype):
+    def send(self, code, body, ctype, headers=None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -415,36 +475,142 @@ class Handler(BaseHTTPRequestHandler):
     def body(self):
         return self.rfile.read(int(self.headers.get("Content-Length", 0)))
 
+    def filename(self, default="файл.docx"):
+        return unicodedata.normalize("NFC", unquote(self.headers.get("X-Filename", default)))
+
     def do_GET(self):
-        if self.path == "/":
-            self.send(200, PAGE.encode("utf8"), "text/html; charset=utf-8")
-        elif self.path == "/api/template":
+        path, _, query = self.path.partition("?")
+        params = {k: unquote(v) for k, _, v in (p.partition("=") for p in query.split("&") if p)}
+        if path == "/":
+            self.send(200, PAGE_PATH.read_bytes(), "text/html; charset=utf-8")
+        elif path == "/api/template":
             self.send_json(template_info())
+        elif path == "/api/settings":
+            self.send_json(config.public_settings())
+        elif path == "/api/history":
+            self.send_json(history.list_runs(params.get("q", ""), params.get("kind", "")))
         else:
             self.send(404, b"not found", "text/plain")
 
     def do_POST(self):
         try:
-            if self.path == "/api/parse":
-                self.send_json({"items": parse_contract(self.body())})
-            elif self.path == "/api/template":
-                data = self.body()
-                template_placeholders(data)  # проверка, что это docx
-                STATE["tpl_bytes"] = data
-                STATE["tpl_name"] = unquote(self.headers.get("X-Filename", "шаблон.docx"))
-                self.send_json(template_info())
-            elif self.path == "/api/generate":
-                req = json.loads(self.body())
-                if not STATE["tpl_bytes"]:
-                    raise ValueError("Не выбран шаблон протокола.")
-                doc = build_protocol(STATE["tpl_bytes"], req.get("fields", {}), req["items"])
-                self.send(200, doc, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-            else:
-                self.send(404, b"not found", "text/plain")
+            self.route()
         except (zipfile.BadZipFile, KeyError):
             self.send_json({"error": "Это не похоже на файл Word (.docx)."}, 400)
+        except gemini.GeminiError as e:
+            self.send_json({"error": str(e)}, 400)
         except Exception as e:  # показываем ошибку в интерфейсе
             self.send_json({"error": str(e)}, 400)
+
+    def route(self):
+        p = self.path
+        # ---- вкладка 1 ----
+        if p == "/api/parse":
+            data = self.body()
+            items = parse_contract(data)
+            STATE["contract"], STATE["contract_name"] = data, self.filename("договор.docx")
+            self.send_json({"items": items})
+        elif p == "/api/template":
+            data = self.body()
+            template_placeholders(data)  # проверка, что это docx
+            STATE["tpl_bytes"] = data
+            STATE["tpl_name"] = self.filename("шаблон.docx")
+            self.send_json(template_info())
+        elif p == "/api/generate":
+            req = json.loads(self.body())
+            if not STATE["tpl_bytes"]:
+                raise ValueError("Не выбран шаблон протокола.")
+            doc = build_protocol(STATE["tpl_bytes"], req.get("fields", {}), req["items"])
+            name = stem(STATE["contract_name"] or "договор")
+            inputs = [(STATE["contract_name"], STATE["contract"])] if STATE["contract"] else []
+            meta = history.save_run("protocol", name, inputs,
+                                    [(f"Протокол разногласий — {name}.docx", doc)],
+                                    extra={"items": len(req["items"]), "template": STATE["tpl_name"]})
+            self.send(200, doc, DOCX_MIME, {"X-Run-Id": quote(meta["id"])})
+        # ---- вкладка 2 ----
+        elif p == "/api/final/contract":
+            data = self.body()
+            info = redline.contract_info(data)
+            with LOCK:
+                STATE["final"].update(contract=data, name=self.filename("договор.docx"))
+            info["name"] = STATE["final"]["name"]
+            self.send_json(info)
+        elif p == "/api/final/source":
+            data = self.body()
+            name = self.filename()
+            with LOCK:
+                STATE["final"]["seq"] += 1
+                sid = f"s{STATE['final']['seq']}"
+            res = sources_mod.parse_source(data, name, sid, use_gemini=self.headers.get("X-Use-Gemini") == "1")
+            STATE["final"]["sources"][sid] = {"bytes": data, "filename": name, "meta": res["meta"],
+                                              "ocr_text": res.get("ocr_text", "")}
+            res.update(id=sid, filename=name)
+            res.pop("ocr_text", None)
+            self.send_json(res)
+        elif p == "/api/final/reparse":
+            req = json.loads(self.body())
+            src = STATE["final"]["sources"][req["id"]]
+            res = edits_mod.parse_protocol(src["bytes"], req["id"], new_col=req.get("new_col"))
+            self.send_json(res)
+        elif p == "/api/final/drop-source":
+            STATE["final"]["sources"].pop(json.loads(self.body()).get("id"), None)
+            self.send_json({"ok": True})
+        elif p in ("/api/final/preview", "/api/final/build"):
+            req = json.loads(self.body())
+            fin = STATE["final"]
+            if not fin["contract"]:
+                raise ValueError("Сначала загрузите исходный договор.")
+            srcs = final_sources(req)
+            doc, report = redline.build_final(fin["contract"], srcs)
+            if p.endswith("preview"):
+                self.send_json(report)
+                return
+            name = stem(fin["name"])
+            out_name = f"{name} — итоговая редакция.docx"
+            inputs = [(fin["name"], fin["contract"])]
+            outputs = [(out_name, doc)]
+            for s in srcs:
+                stored = fin["sources"][s["id"]]
+                inputs.append((stored["filename"], stored["bytes"]))
+                if stored.get("ocr_text"):
+                    outputs.append((stem(stored["filename"]) + ".распознано.txt", stored["ocr_text"]))
+            src_meta = []
+            for s, rep in zip(srcs, report["sources"]):
+                on = [r for r in rep["results"] if r.get("status") != "off"]
+                src_meta.append({"label": s["label"], "file": s["filename"], "total": len(on),
+                                 "applied": sum(1 for r in on if r.get("status") in ("exact", "by_text"))})
+            md = history.report_md(fin["name"], srcs, report)
+            meta = history.save_run("final", name, inputs, outputs, report_md=md,
+                                    extra={"sources": src_meta, "warnings": report["warnings"]})
+            self.send(200, doc, DOCX_MIME, {"X-Run-Id": quote(meta["id"]), "X-Filename": quote(out_name)})
+        # ---- история ----
+        elif p == "/api/reveal":
+            req = json.loads(self.body())
+            what = req.get("what", "folder")
+            if what == "archive":
+                history.ARCHIVE.mkdir(exist_ok=True)
+                history.open_file(history.ARCHIVE)
+            else:
+                run_id = unquote(req.get("id", ""))
+                run_dir = history.resolve(run_id)
+                meta = json.loads((run_dir / "meta.json").read_text(encoding="utf8"))
+                first = (meta.get("outputs") or [None])[0]
+                if what == "open" and first:
+                    history.open_file(history.resolve(run_id, first))
+                elif what == "result" and first:
+                    history.reveal(history.resolve(run_id, first))
+                else:
+                    history.reveal(run_dir)
+            self.send_json({"ok": True})
+        # ---- настройки ----
+        elif p == "/api/settings":
+            req = json.loads(self.body() or b"{}")
+            self.send_json(config.save_settings(req.get("key"), req.get("model")))
+        elif p == "/api/settings/test":
+            gemini.ping()
+            self.send_json({"ok": True})
+        else:
+            self.send(404, b"not found", "text/plain")
 
 
 def free_port(start=8765):
@@ -456,229 +622,6 @@ def free_port(start=8765):
             except OSError:
                 continue
     raise RuntimeError("Нет свободного порта")
-
-
-PAGE = r"""<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Протокол разногласий</title>
-<style>
-  :root {
-    --bg: #f6f5f2; --card: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e3e1dc;
-    --accent: #2f5d8a; --accent-ink: #ffffff;
-    --ins-bg: #dcf3df; --ins-ink: #14532d; --del-bg: #fbe0de; --del-ink: #8a1c13;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  main { max-width: 1200px; margin: 0 auto; padding: 28px 20px 120px; }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .drop { border: 2px dashed #c9c6bf; border-radius: 14px; background: var(--card);
-          padding: 36px 20px; text-align: center; cursor: pointer; transition: .15s; }
-  .drop.over { border-color: var(--accent); background: #eef3f8; }
-  .drop b { font-size: 17px; }
-  .drop small { display: block; color: var(--muted); margin-top: 6px; }
-  .loaded { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-           padding: 18px 20px; margin-top: 18px; }
-  .panel h2 { font-size: 15px; margin: 0 0 12px; }
-  .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-  .fields label { display: block; font-size: 13px; color: var(--muted); }
-  .fields input { width: 100%; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--line);
-                  border-radius: 8px; font: inherit; }
-  .muted { color: var(--muted); font-size: 13px; }
-  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
-           padding: 7px 14px; border-radius: 8px; cursor: pointer; }
-  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
-                   padding: 11px 22px; font-weight: 600; }
-  button:disabled { opacity: .5; cursor: default; }
-  .toolbar { display: flex; align-items: center; gap: 10px; margin: 26px 0 12px; flex-wrap: wrap; }
-  .toolbar .count { margin-left: auto; color: var(--muted); }
-  .legend span { padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-size: 13px; }
-  .item { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-          margin-bottom: 12px; overflow: hidden; }
-  .item.off { opacity: .55; }
-  .item-head { display: flex; align-items: center; gap: 10px; padding: 12px 18px;
-               border-bottom: 1px solid var(--line); cursor: pointer; user-select: none; }
-  .item-head input { width: 18px; height: 18px; accent-color: var(--accent); }
-  .num { font-weight: 700; }
-  .tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #eceae5; color: var(--muted); }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; }
-  .col { padding: 12px 18px 14px; font-size: 14px; }
-  .col + .col { border-left: 1px solid var(--line); }
-  .col h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-  .col p { margin: 0 0 6px; }
-  .col .empty { color: var(--muted); font-style: italic; }
-  ins { background: var(--ins-bg); color: var(--ins-ink); text-decoration: none; border-radius: 3px; }
-  del { background: var(--del-bg); color: var(--del-ink); border-radius: 3px; }
-  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,.95);
-         border-top: 1px solid var(--line); padding: 14px 20px; }
-  .bar-in { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 16px; }
-  .err { color: var(--del-ink); }
-  [hidden] { display: none !important; }
-  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } .col + .col { border-left: 0; border-top: 1px solid var(--line); } }
-</style>
-</head>
-<body>
-<main>
-  <h1>Протокол разногласий из правок Word</h1>
-  <p class="sub">Файлы обрабатываются только на этом компьютере и никуда не отправляются.</p>
-
-  <div id="drop" class="drop">
-    <b>Перетащите сюда договор с правками (.docx)</b>
-    <small>или нажмите, чтобы выбрать файл</small>
-  </div>
-  <input id="file" type="file" accept=".docx" hidden>
-
-  <div id="loadedBox" class="panel loaded" hidden>
-    <span>Договор: <b id="fname"></b></span>
-    <button id="another">Загрузить другой</button>
-  </div>
-
-  <div class="panel">
-    <h2>Шаблон и данные для протокола</h2>
-    <div class="loaded" style="margin-bottom:14px">
-      <span>Шаблон: <b id="tplName">—</b></span>
-      <button id="tplBtn">Выбрать другой шаблон</button>
-      <input id="tplFile" type="file" accept=".docx" hidden>
-    </div>
-    <div id="fields" class="fields"></div>
-    <p class="muted" id="fieldsHint" style="margin:10px 0 0">Пустые поля останутся в протоколе как {{…}} — их можно заполнить в Word.</p>
-  </div>
-
-  <p id="error" class="err"></p>
-
-  <div id="listBox" hidden>
-    <div class="toolbar">
-      <button id="all">Выбрать все</button>
-      <button id="none">Снять все</button>
-      <span class="legend muted">Подсветка: <span style="background:var(--del-bg);color:var(--del-ink)"><s>удалено</s></span><span style="background:var(--ins-bg);color:var(--ins-ink)">добавлено</span></span>
-      <span class="count" id="count"></span>
-    </div>
-    <div id="list"></div>
-  </div>
-</main>
-
-<div class="bar" id="bar" hidden>
-  <div class="bar-in">
-    <button class="primary" id="make">Создать протокол разногласий</button>
-    <span class="muted" id="barInfo"></span>
-  </div>
-</div>
-
-<script>
-const $ = id => document.getElementById(id);
-let items = [], contractName = "";
-const KIND = { new: "новый пункт", deleted: "пункт исключён", renum: "изменён только номер", changed: "" };
-
-function esc(s) { return s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
-
-function renderParas(paras, emptyText) {
-  if (!paras.length) return `<p class="empty">${emptyText}</p>`;
-  return paras.map(segs => "<p>" + segs.map(([k, t]) =>
-    k === "ins" ? `<ins>${esc(t)}</ins>` : k === "del" ? `<del>${esc(t)}</del>` : esc(t)).join("") + "</p>").join("");
-}
-
-function render() {
-  $("list").innerHTML = items.map((it, i) => `
-    <div class="item ${it.on ? "" : "off"}" data-i="${i}">
-      <label class="item-head">
-        <input type="checkbox" ${it.on ? "checked" : ""} data-i="${i}">
-        <span class="num">П. ${esc(it.label)}</span>
-        ${KIND[it.kind] ? `<span class="tag">${KIND[it.kind]}</span>` : ""}
-        <span class="muted" style="margin-left:auto">включить в протокол разногласий</span>
-      </label>
-      <div class="cols">
-        <div class="col"><h3>Было</h3>${renderParas(it.old, "Отсутствует")}</div>
-        <div class="col"><h3>Стало</h3>${renderParas(it.new, "Исключить")}</div>
-      </div>
-    </div>`).join("");
-  updateCount();
-}
-
-function updateCount() {
-  const n = items.filter(x => x.on).length;
-  $("count").textContent = `Пунктов с правками: ${items.length}, выбрано: ${n}`;
-  $("barInfo").textContent = `В протокол попадёт пунктов: ${n}`;
-  $("make").disabled = n === 0;
-  document.querySelectorAll(".item").forEach(el => el.classList.toggle("off", !items[el.dataset.i].on));
-}
-
-$("list").addEventListener("change", e => {
-  if (e.target.dataset.i !== undefined) { items[e.target.dataset.i].on = e.target.checked; updateCount(); }
-});
-$("all").onclick = () => { items.forEach(x => x.on = true); render(); };
-$("none").onclick = () => { items.forEach(x => x.on = false); render(); };
-
-async function post(url, body, headers = {}) {
-  const r = await fetch(url, { method: "POST", body, headers });
-  if (!r.ok) { let m = "Ошибка"; try { m = (await r.json()).error; } catch (_) {} throw new Error(m); }
-  return r;
-}
-
-async function loadContract(file) {
-  $("error").textContent = "";
-  if (!file.name.toLowerCase().endsWith(".docx")) { $("error").textContent = "Нужен файл Word в формате .docx"; return; }
-  try {
-    const data = await (await post("/api/parse", file)).json();
-    contractName = file.name.replace(/\.docx$/i, "");
-    items = data.items.map(x => ({ ...x, on: true }));
-    $("fname").textContent = file.name;
-    $("drop").hidden = true; $("loadedBox").hidden = false;
-    $("listBox").hidden = false; $("bar").hidden = false;
-    if (!items.length) $("error").textContent = "В этом файле не найдено правок в режиме рецензирования.";
-    render();
-  } catch (e) { $("error").textContent = e.message; }
-}
-
-const drop = $("drop");
-drop.onclick = () => $("file").click();
-$("another").onclick = () => $("file").click();
-$("file").onchange = e => { if (e.target.files[0]) loadContract(e.target.files[0]); e.target.value = ""; };
-["dragenter", "dragover"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
-["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
-document.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadContract(f); });
-
-function showTemplate(info) {
-  $("tplName").textContent = info.name || "не найден — выберите файл шаблона";
-  const old = {};
-  document.querySelectorAll("#fields input").forEach(i => old[i.name] = i.value);
-  $("fields").innerHTML = info.placeholders.map(p =>
-    `<label>${esc(p)}<input name="${esc(p)}" value="${esc(old[p] || "")}"></label>`).join("");
-  $("fieldsHint").hidden = !info.placeholders.length;
-}
-$("tplBtn").onclick = () => $("tplFile").click();
-$("tplFile").onchange = async e => {
-  const f = e.target.files[0]; e.target.value = "";
-  if (!f) return;
-  try { showTemplate(await (await post("/api/template", f, { "X-Filename": encodeURIComponent(f.name) })).json()); $("error").textContent = ""; }
-  catch (err) { $("error").textContent = err.message; }
-};
-fetch("/api/template").then(r => r.json()).then(showTemplate);
-
-$("make").onclick = async () => {
-  $("error").textContent = "";
-  const fields = {};
-  document.querySelectorAll("#fields input").forEach(i => fields[i.name] = i.value);
-  const chosen = items.filter(x => x.on).map(({ label, old, new: nw }) => ({ label, old, new: nw }));
-  try {
-    const blob = await (await post("/api/generate", JSON.stringify({ fields, items: chosen }),
-                                   { "Content-Type": "application/json" })).blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `Протокол разногласий — ${contractName}.docx`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    $("barInfo").textContent = "Готово: файл сохранён в папку «Загрузки».";
-  } catch (e) { $("error").textContent = e.message; }
-};
-</script>
-</body>
-</html>
-"""
 
 
 def main():
